@@ -51,19 +51,6 @@ public class MainActivity extends AppCompatActivity {
                 audioRecorder.startRecording(256);
             }
         });
-//        binding.chart.setOnChartValueSelectedListener(new OnChartValueSelectedListener() {
-//            @Override
-//            public void onValueSelected(Entry e, Highlight h) {
-//                float x = e.getX();
-//                float y = e.getY();
-//                Toast.makeText(MainActivity.this, "X: " + x + "\nY: " + y, Toast.LENGTH_SHORT).show();
-//            }
-//
-//            @Override
-//            public void onNothingSelected() {
-//
-//            }
-//        });
         binding.btnStart.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
