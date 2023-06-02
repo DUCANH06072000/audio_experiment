@@ -117,7 +117,7 @@ public class AudioRecorder {
     /// đọc file thanh âm thanh
     public void readFileAudio(ListenerEntry listenerEntry) {
         byte[] audioData = null;
-        File file = new File(context.getExternalFilesDir(null), "thuamjava.util.Random@299366e.wav");
+        File file = new File(context.getExternalFilesDir(null), "thuamjava.util.Random@e027ac6.wav");
         Log.e("Tag", file.getPath());
         try {
             FileInputStream fileInputStream = new FileInputStream(file);
@@ -126,8 +126,7 @@ public class AudioRecorder {
                 fileInputStream.read(audioData);
                 long dataSize = file.length();
                 double audioDuration = dataSize / (16000 * 1 * 2);
-                Log.e("Audio chưa lọc âm thanh sau khi chưa lọc",Arrays.toString(audioData));
-              //  convertFrameDataToAudio(audioData);
+                Log.e("Audio chưa lọc âm thanh sau khi chưa lọc", Arrays.toString(audioData));
                 calculateSoundIntensity(audioData, 1024, 512, audioDuration, listenerEntry);
                 fileInputStream.close();
             } catch (IOException e) {
@@ -149,7 +148,6 @@ public class AudioRecorder {
         double endTime = 0;
         byte[] frameData = null;
         double sum = 0;
-        boolean checkWord = false;
         Log.e("Thời lượng của các Frame", String.valueOf(frameDuration));
         double[] soundIntensity = new double[numFrames];
         double[] soundFrequency = new double[numFrames];
@@ -158,24 +156,48 @@ public class AudioRecorder {
             int endIndex = startIndex + frameSize;
             frameData = Arrays.copyOfRange(audioData, startIndex, endIndex);
             startTime = i * frameDuration;
-             endTime = startTime + frameDuration;
+            endTime = startTime + frameDuration;
             double intensity = calculateFrameSoundIntensity(frameData);
             double frequency = calculateFrequency(frameData);
             soundIntensity[i] = intensity;
             soundFrequency[i] = frequency;
-            sum+=soundIntensity[i];
+            sum += soundIntensity[i];
             listenerEntry.onListenerEntry(soundIntensity[i], startTime, numFrames);
+         //   System.out.println("Frame " + i + ": Start Time = " + startTime + "s, End Time = " + endTime + "s" + "  Cường độ âm thanh theo từng khoảng:" + soundIntensity[i] + " Tần số âm thanh:" + soundFrequency[i]);
         }
-        Log.e("Cường độ âm thanh",Arrays.toString(soundIntensity));
-        double average = sum/numFrames;
-        Log.e("Trung bình công:",String.valueOf(average));
-        for (int i =0;i<soundIntensity.length;i++){
-            if (soundIntensity[i]>average)
-            {
-                System.out.println("Frame " + i + ": Start Time = " + startTime + "s, End Time = " + endTime + "s" + "  Cường độ âm thanh theo từng khoảng:" + soundIntensity[i]+" Tần số âm thanh:"+ soundFrequency[i]);
-            }
-        }
+        Log.e("Cường độ âm thanh", Arrays.toString(soundIntensity));
+        double average = sum / numFrames;
+        Log.e("Trung bình công:", String.valueOf(average));
+        filterSound(audioData,soundIntensity,average,frameStride,frameSize,frameDuration);
+
     }
+
+
+    /**
+     * lọc cường độ âm thanh
+     */
+    private void filterSound(byte[] audioData,double[] soundIntensity, double average,int frameStride,int frameSize,double frameDuration) {
+        int count = 0;
+        for (int i =0;i<soundIntensity.length;i++)
+            if (soundIntensity[i]>average){
+                count++;
+            }
+        byte[] mergedFrame = new byte[count*frameSize];
+        int mergedIndex = 0;
+        for (int i = 0; i < soundIntensity.length; i++)
+            if (soundIntensity[i] > average) {
+                int startIndex = i*frameStride;
+                int endIndex = startIndex+frameSize;
+                double startTime = i*frameDuration;
+                double endTime = startTime+frameDuration;
+                byte[] voiceFrame = Arrays.copyOfRange(audioData,startIndex,endIndex);
+                System.arraycopy(voiceFrame,0,mergedFrame,mergedIndex*frameSize,frameSize);
+                mergedIndex++;
+                System.out.println("Frame " + i + ": Start Time = " + startTime + "s, End Time = " + endTime + "s" + "  Cường độ âm thanh theo từng khoảng:" + soundIntensity[i]);
+            }
+        convertFrameDataToAudio(mergedFrame);
+    }
+
 
 
     /**
@@ -205,6 +227,7 @@ public class AudioRecorder {
         });
 
         playbackThread.start();
+
 
     }
 
