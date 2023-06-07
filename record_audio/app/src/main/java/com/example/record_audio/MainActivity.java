@@ -23,6 +23,9 @@ import com.github.mikephil.charting.highlight.Highlight;
 import com.github.mikephil.charting.listener.OnChartValueSelectedListener;
 
 import android.Manifest;
+import android.widget.Adapter;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Toast;
 
 import java.io.File;
@@ -36,6 +39,8 @@ public class MainActivity extends AppCompatActivity {
     private ActivityMainBinding binding;
     private boolean isRecording = false;
     private MediaRecorder recorder;
+    private int selectedIndex = 0;
+    private  int apiSelected =0;
     private AudioRecorder audioRecorder;
     private List<Entry> entries = new ArrayList<>();
 
@@ -44,49 +49,125 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+        initEvent();
+        initSpinnerApi();
         audioRecorder = new AudioRecorder(this, MainActivity.this);
         binding.btnRecord256kbps.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                audioRecorder.startRecording(256);
+                if (!isRecording) {
+                    audioRecorder.startRecording(256);
+                    binding.btnRecord256kbps.setText("Dưng ghi âm ");
+                    isRecording = true;
+                } else {
+                    isRecording = false;
+                    binding.btnRecord256kbps.setText("Ghi âm");
+                    audioRecorder.stopRecording();
+                    entries.clear();
+                    audioRecorder.calculateSound(new AudioRecorder.ListenerEntry() {
+                        @Override
+                        public void onListenerEntry(double soundIntensity, double duration, int numFrames) {
+                            Log.e("tag",String.valueOf(soundIntensity));
+                            for (int i = 0; i < 130; i++) {
+                                entries.add(new Entry((float) duration, (float) soundIntensity));
+                            }
+                            LineDataSet dataSet = new LineDataSet(entries, "Cường độ âm thanh");
+                            LineData lineData = new LineData(dataSet);
+                            binding.chart.setData(lineData);
+                            binding.chart.invalidate();
+                        }
+                    });
+                }
             }
         });
-        binding.btnStart.setOnClickListener(new View.OnClickListener() {
+
+        binding.btnShowChart.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                entries.clear();
-                audioRecorder.stopRecording();
-                audioRecorder.readFileAudio(new AudioRecorder.ListenerEntry() {
-                    @Override
-                    public void onListenerEntry(double soundIntensity, double duration,int numFrame) {
-                        for (int i =0;i<numFrame;i++){
-                            entries.add(new Entry((float) duration,(float) soundIntensity));
-                        }
-                        LineDataSet dataSet = new LineDataSet(entries, "Cường độ âm thanh");
-                        LineData lineData = new LineData(dataSet);
-                        binding.chart.setData(lineData);
-                        binding.chart.invalidate();
-                    }
-                });
+                binding.chart.setVisibility(View.VISIBLE);
             }
         });
         binding.btnCallApi.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                audioRecorder.callApi(new AudioRecorder.ListenerMessage() {
-                    @Override
-                    public void onListenerTime(String time) {
-                        binding.textTime.setText(time);
-                    }
+                if (binding.editDomain.getText().toString().equals("")){
+                    Toast.makeText(getApplicationContext(),"Nhập domain",Toast.LENGTH_SHORT).show();
+                }
+                else {
+                    audioRecorder.callApi(new AudioRecorder.ListenerMessage() {
+                        @Override
+                        public void onListenerTime(String time) {
+                            binding.textTime.setText(time);
+                            binding.textTime.setVisibility(View.VISIBLE);
+                            binding.editDomain.setVisibility(View.GONE);
+                        }
 
-                    @Override
-                    public void onListenerMessage(String message) {
-                        binding.textContent.setText(message);
-                        Log.e("activity", message);
-                    }
-                });
+                        @Override
+                        public void onListenerMessage(String message) {
+                            binding.textContent.setText(message);
+                            binding.textContent.setVisibility(View.VISIBLE);
+                            Log.e("activity", message);
+                        }
+                    }, binding.editDomain.getText().toString(),apiSelected);
+                }
             }
         });
+    }
+
+    private void initEvent() {
+        String[] options = {
+                "Chọn trình phát",
+                "Phát âm thanh được thu",
+                "Phát âm thanh sau khi lọc cường độ âm thanh",
+                "Phát âm thanh sau khi lọc tần số âm thanh"
+        };
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.item_spinner, options);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_item);
+        binding.spnStartAudio.setAdapter(adapter);
+        binding.spnStartAudio.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                selectedIndex = position;
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        binding.btnStartAudio.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (selectedIndex == 0) {
+                    Toast.makeText(getApplicationContext(), "Vui lòng chọn chế độ", Toast.LENGTH_SHORT).show();
+                } else {
+                    audioRecorder.startAudio(selectedIndex);
+                }
+            }
+        });
+    }
+
+    private void initSpinnerApi(){
+        String[] options = {
+                "Chọn File API",
+                "Call API gốc",
+                "Call API File Cường độ âm thanh",
+                "Call API File Tần số âm thanh"
+        };
+       ArrayAdapter<String> adapter = new ArrayAdapter<>(this,R.layout.item_api_audio,options);
+       adapter.setDropDownViewResource(android.R.layout.simple_spinner_item);
+       binding.spnCallApi.setAdapter(adapter);
+       binding.spnCallApi.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+           @Override
+           public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+               apiSelected = position;
+           }
+
+           @Override
+           public void onNothingSelected(AdapterView<?> parent) {
+
+           }
+       });
+
     }
 
     @Override

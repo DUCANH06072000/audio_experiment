@@ -12,10 +12,14 @@ import retrofit2.http.PUT;
 import retrofit2.http.Part;
 
 public interface ApiService {
-    String domain = "https://e6ec-1-53-222-145.ngrok-free.app/";
-    ApiService apiService = new Retrofit.Builder().baseUrl(domain).
-            addConverterFactory(GsonConverterFactory.create()).build().
-            create(ApiService.class);
+    String domain = "https://027a-183-80-56-176.ngrok-free.app";
+
+      static ApiService getApiService(String domain){
+        ApiService apiService = new Retrofit.Builder().baseUrl(domain).
+                addConverterFactory(GsonConverterFactory.create()).build().
+                create(ApiService.class);
+        return  apiService;
+    }
 
     @Multipart
     @PUT("process")
