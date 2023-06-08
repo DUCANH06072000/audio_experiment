@@ -56,20 +56,13 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 if (!isRecording) {
-                    audioRecorder.startRecording(256);
-                    binding.btnRecord256kbps.setText("Dưng ghi âm ");
-                    isRecording = true;
-                } else {
-                    isRecording = false;
-                    binding.btnRecord256kbps.setText("Ghi âm");
-                    audioRecorder.stopRecording();
                     entries.clear();
-                    audioRecorder.calculateSound(new AudioRecorder.ListenerEntry() {
+                    audioRecorder.startStreamRecord(new AudioRecorder.ListenerEntry() {
                         @Override
-                        public void onListenerEntry(double soundIntensity, double duration, int numFrames) {
-                            Log.e("tag",String.valueOf(soundIntensity));
-                            for (int i = 0; i < 130; i++) {
-                                entries.add(new Entry((float) duration, (float) soundIntensity));
+                        public void onListenerEntry(double soundIntensity, double duration) {
+                            Log.e("Cường độ âm thanh",String.valueOf(soundIntensity)+" Thời gian  "+String.valueOf(duration));
+                            for (int i =0;i<500;i++){
+                                entries.add(new Entry((float) duration,(float)soundIntensity));
                             }
                             LineDataSet dataSet = new LineDataSet(entries, "Cường độ âm thanh");
                             LineData lineData = new LineData(dataSet);
@@ -77,6 +70,12 @@ public class MainActivity extends AppCompatActivity {
                             binding.chart.invalidate();
                         }
                     });
+                    binding.btnRecord256kbps.setText("Dưng ghi âm ");
+                    isRecording = true;
+                } else {
+                    isRecording = false;
+                    binding.btnRecord256kbps.setText("Ghi âm");
+                    audioRecorder.stopStreamRecord();
                 }
             }
         });
@@ -84,7 +83,7 @@ public class MainActivity extends AppCompatActivity {
         binding.btnShowChart.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                binding.chart.setVisibility(View.VISIBLE);
+                audioRecorder.readFileAudio();
             }
         });
         binding.btnCallApi.setOnClickListener(new View.OnClickListener() {

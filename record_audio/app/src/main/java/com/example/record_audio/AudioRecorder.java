@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -65,8 +66,16 @@ public class AudioRecorder {
 
     private double average = 0; /// trung bình cường độ âm thanh
     String outputfile = "";
-    byte[] audioData = null;
     double audioDuration = 0.0;
+
+    private AudioRecord audioRecord;
+
+    private int streamType = AudioManager.STREAM_MUSIC;
+    private int sampleRate = 16000; // Tần số mẫu âm thanh (Hz)
+    private int channelConfig_in = AudioFormat.CHANNEL_IN_MONO;
+    private int audioFormat = AudioFormat.ENCODING_PCM_16BIT; // Định dạng âm thanh PCM 16-bit
+
+    byte[] audioData = null;
 
 
     public AudioRecorder(Context context, Activity activity) {
@@ -77,53 +86,82 @@ public class AudioRecorder {
         }
     }
 
-    /**
-     * bắt đầu ghi âm
+    /***
+     * stream record
      */
-    public void startRecording(int bitRate) {
-        String outputPath = context.getExternalFilesDir(null) + "/Audio";
-        File file = new File(outputPath);
-        if (file.exists()) {
-            file.delete();
+    public void startStreamRecord(ListenerEntry listenerEntry) {
+        int bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig_in, audioFormat);
+        if (isRecording) return;
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            return;
         }
-        recorder = new MediaRecorder();
-        random = new Random();
-        recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);
-        recorder.setAudioChannels(1); // chế độ mono
-        recorder.setAudioEncodingBitRate(bitRate);
-        recorder.setAudioSamplingRate(16000);
-        if (!isRecording) {
-            recorder.setOutputFile(getOutputFilePath());
-            try {
-                recorder.prepare();
-                recorder.start();
-            } catch (Exception e) {
-                e.printStackTrace();
+        int totalBufferSize = bufferSize * (sampleRate / bufferSize) * 10;
+        byte[] buffer = new byte[bufferSize];
+        audioData = new byte[totalBufferSize];
+        audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelConfig_in, audioFormat, bufferSize);
+        audioRecord.startRecording();
+        isRecording = true;
+        long startTime = System.currentTimeMillis();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int offset = 0;
+                while (isRecording) {
+                    int bytesRead = audioRecord.read(buffer, 0, bufferSize);
+                    if (offset + bytesRead > audioData.length) {
+                        // Resize audioData if necessary
+                        byte[] resizedData = new byte[offset + bytesRead];
+                        System.arraycopy(audioData, 0, resizedData, 0, offset);
+                        audioData = resizedData;
+                    }
+                    System.arraycopy(buffer, 0, audioData, offset, bytesRead);
+                    offset += bytesRead;
+                    long currentTime = System.currentTimeMillis();
+                    long elapsedTime = currentTime - startTime;
+                    audioDuration = (double) elapsedTime / 1000;
+                    listenerEntry.onListenerEntry(calculateFrameSoundIntensity(buffer), audioDuration);
+                }
             }
-            isRecording = true;
+        }).start();
+    }
+    /**
+     * dừng stream record
+     */
+    public void stopStreamRecord() {
+        if (!isRecording) return;
+        isRecording = false;
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
+        audioRecord.stop();
+        Log.e("audioData",Arrays.toString(audioData));
+        audioRecord.release();
     }
 
+
     /**
-     * dừng ghi âm
-     * /
+     * Chuyển đổi từ FrameData sang audio
      */
-    public void stopRecording() {
-        if (isRecording) {
-            recorder.stop();
-            recorder.reset();
-            recorder.release();
-            recorder = null;
-            isRecording = false;
-            convertMp4ToWav();
-            readFileAudio();
-            File file = new File(getOutputFilePath());
-            file.delete();
-        } else {
-            Log.e("FIle rỗng", "Chưa có file ghi âm");
-        }
+    private void convertFrameDataToAudio(byte[] frameData) {
+        // Khởi tạo AudioTrack với các tham số cần thiết
+        int sampleRate = 16000; // Tốc độ mẫu âm thanh
+        int channelConfig = AudioFormat.CHANNEL_OUT_MONO; // Kênh âm thanh đơn
+        int audioFormat = AudioFormat.ENCODING_PCM_16BIT; // Định dạng âm thanh PCM 16-bit
+        int bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat);
+        AudioTrack audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, sampleRate, channelConfig,
+                audioFormat, bufferSize, AudioTrack.MODE_STREAM);
+
+// Chuẩn bị và phát âm thanh
+        audioTrack.play();
+    Log.e("FrameData",Arrays.toString(frameData));
+// Ghi dữ liệu âm thanh vào AudioTrack từ mảng byte
+        audioTrack.write(audioData, 0, audioData.length);
+
+// Dừng và giải phóng tài nguyên
+        audioTrack.stop();
+        audioTrack.release();
     }
 
     /**
@@ -148,15 +186,18 @@ public class AudioRecorder {
     }
 
     /// đọc file thanh âm thanh
-    private void readFileAudio() {
-        File file = new File(outputfile);
+    public void readFileAudio() {
+        File file = new File(context.getExternalFilesDir(null), "thuamjava.util.Random@6739123.wav");
         Log.e("Tag", file.getPath());
         try {
             FileInputStream fileInputStream = new FileInputStream(file);
             audioData = new byte[(int) file.length()];
             try {
                 fileInputStream.read(audioData);
+                Log.e("TEST", Arrays.toString(audioData));
                 long dataSize = file.length();
+                convertFrameDataToAudio(audioData);
+                Log.e("Tag", Arrays.toString(audioData));
                 audioDuration = dataSize / (16000 * 1 * 2);
                 fileInputStream.close();
             } catch (IOException e) {
@@ -193,7 +234,7 @@ public class AudioRecorder {
             soundIntensity[i] = intensity;
             soundFrequency[i] = frequency;
             sum += soundIntensity[i];
-            listenerEntry.onListenerEntry(soundIntensity[i], startTime, numFrames);
+            //   listenerEntry.onListenerEntry(soundIntensity[i], startTime, numFrames);
             System.out.println("Frame " + i + ": Start Time = " + startTime + "s, End Time = " + endTime + "s" + "  Cường độ âm thanh theo từng khoảng:" + soundIntensity[i] + " Tần số âm thanh:" + soundFrequency[i]);
         }
         average = sum / numFrames;
@@ -263,33 +304,6 @@ public class AudioRecorder {
         } else {
             Toast.makeText(context, "Cường độ âm thanh rỗng", Toast.LENGTH_SHORT).show();
         }
-    }
-
-    /**
-     * Chuyển đổi từ FrameData sang audio
-     */
-    private void convertFrameDataToAudio(byte[] frameData) {
-        int streamType = AudioManager.STREAM_MUSIC;
-        int sampleRate = 16000; // Tần số mẫu âm thanh (Hz)
-        int channelConfig = AudioFormat.CHANNEL_OUT_MONO; // Cấu hình âm thanh stereo
-        int audioFormat = AudioFormat.ENCODING_PCM_16BIT; // Định dạng âm thanh PCM 16-bit
-        int bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat);
-        AudioTrack audioTrack = new AudioTrack(streamType, sampleRate, channelConfig, audioFormat,
-                bufferSize, AudioTrack.MODE_STREAM);
-        audioTrack.setPlaybackRate(sampleRate);
-        audioTrack.play();
-        audioTrack.write(frameData, 0, frameData.length);
-        // Chuẩn bị và bắt đầu phát
-        Thread playbackThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                while (audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) {
-                    audioTrack.stop();
-                    audioTrack.release();
-                }
-            }
-        });
-        playbackThread.start();
     }
 
     /**
@@ -444,6 +458,6 @@ public class AudioRecorder {
     }
 
     public interface ListenerEntry {
-        public void onListenerEntry(double soundIntensity, double duration, int numFrames);
+        public void onListenerEntry(double soundIntensity, double duration);
     }
 }
