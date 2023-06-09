@@ -1,50 +1,26 @@
 package com.example.record_audio;
-
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
-import android.media.MediaExtractor;
-import android.media.MediaFormat;
-import android.media.MediaPlayer;
 import android.media.MediaRecorder;
-import android.media.audiofx.Visualizer;
 import android.util.Log;
-import android.widget.Advanceable;
 import android.widget.Toast;
-
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-
-import com.arthenica.mobileffmpeg.FFmpeg;
-import com.github.mikephil.charting.data.Entry;
-
 import org.apache.commons.math3.complex.Complex;
 import org.apache.commons.math3.transform.DftNormalization;
 import org.apache.commons.math3.transform.FastFourierTransformer;
 import org.apache.commons.math3.transform.TransformType;
-import org.jtransforms.fft.DoubleFFT_1D;
-
-import java.io.BufferedInputStream;
-import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Random;
-
-import kotlin.jvm.internal.markers.KMutableMap;
 import okhttp3.MediaType;
 import okhttp3.MultipartBody;
 import okhttp3.RequestBody;
@@ -56,28 +32,23 @@ import retrofit2.Response;
 public class AudioRecorder {
     private boolean isRecording = false;
     private Context context;
-    private MediaRecorder recorder;
     private Random random;
     private String[] permissions = {Manifest.permission.RECORD_AUDIO, Manifest.permission.WRITE_EXTERNAL_STORAGE};
 
     private double[] soundIntensity = null; /// cường độ âm thanh theo thời gian của
     private double[] soundFrequency = null; /// tần sô âm thanh theo thời gian
-    private double frameDuration = 0; /// thời gian của từng Frame
-
     private double average = 0; /// trung bình cường độ âm thanh
-    String outputfile = "";
     double audioDuration = 0.0;
 
     private AudioRecord audioRecord;
-
-    private int streamType = AudioManager.STREAM_MUSIC;
     private int sampleRate = 16000; // Tần số mẫu âm thanh (Hz)
     private int channelConfig_in = AudioFormat.CHANNEL_IN_MONO;
     private int audioFormat = AudioFormat.ENCODING_PCM_16BIT; // Định dạng âm thanh PCM 16-bit
 
     byte[] audioData = null;
-
-
+    byte[] audioDataIntensity = null;
+    byte[] audioDataFrequency = null;
+    int index = 0;
     public AudioRecorder(Context context, Activity activity) {
         this.context = context;
         if (ContextCompat.checkSelfPermission(activity, permissions[0]) != PackageManager.PERMISSION_GRANTED ||
@@ -98,6 +69,10 @@ public class AudioRecorder {
         int totalBufferSize = bufferSize * (sampleRate / bufferSize) * 10;
         byte[] buffer = new byte[bufferSize];
         audioData = new byte[totalBufferSize];
+        audioDataIntensity = new byte[totalBufferSize];
+        audioDataFrequency = new byte[totalBufferSize];
+        soundIntensity = new double[bufferSize];
+        soundFrequency = new double[bufferSize];
         audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelConfig_in, audioFormat, bufferSize);
         audioRecord.startRecording();
         isRecording = true;
@@ -107,23 +82,27 @@ public class AudioRecorder {
             public void run() {
                 int offset = 0;
                 while (isRecording) {
-                    int bytesRead = audioRecord.read(buffer, 0, bufferSize);
-                    if (offset + bytesRead > audioData.length) {
-                        // Resize audioData if necessary
-                        byte[] resizedData = new byte[offset + bytesRead];
-                        System.arraycopy(audioData, 0, resizedData, 0, offset);
-                        audioData = resizedData;
-                    }
-                    System.arraycopy(buffer, 0, audioData, offset, bytesRead);
-                    offset += bytesRead;
                     long currentTime = System.currentTimeMillis();
                     long elapsedTime = currentTime - startTime;
                     audioDuration = (double) elapsedTime / 1000;
-                    listenerEntry.onListenerEntry(calculateFrameSoundIntensity(buffer), audioDuration);
+                    int bytesRead = audioRecord.read(buffer, 0, bufferSize);
+                    readAudio(offset, bytesRead, buffer);
+                    offset += bytesRead;
+                    index++;
+                    soundIntensity[index] = calculateFrameSoundIntensity(buffer);  // Kiểm tra cường độ âm thanh
+                    soundFrequency[index] = calculateFrequency(buffer);
+                    if (soundIntensity[index] > 50) {
+                        filterAudioIntensity(offset, bytesRead, buffer);
+                    }
+                    if (soundFrequency[index] > 100 && soundFrequency[index] < 600) {
+                        filterAudioFrequency(offset, bytesRead, buffer);
+                    }
+                    listenerEntry.onListenerEntry(soundIntensity[index], audioDuration, soundFrequency[index]);
                 }
             }
         }).start();
     }
+
     /**
      * dừng stream record
      */
@@ -136,8 +115,42 @@ public class AudioRecorder {
             e.printStackTrace();
         }
         audioRecord.stop();
-        Log.e("audioData",Arrays.toString(audioData));
         audioRecord.release();
+    }
+
+    /**
+     * đọc dữ liệu
+     */
+    private void readAudio(int offset, int bytesRead, byte[] buffer) {
+        if (offset + bytesRead > audioData.length) {
+            byte[] resizedData = new byte[offset + bytesRead];
+            System.arraycopy(audioData, 0, resizedData, 0, offset);
+            audioData = resizedData;
+        }
+        System.arraycopy(buffer, 0, audioData, offset, bytesRead);
+        convertToWav(audioData,"audio");
+    }
+
+    private void filterAudioIntensity(int offset, int bytesRead, byte[] buffer) {
+        int requiredLength = offset + bytesRead;
+        if (requiredLength > audioDataIntensity.length) {
+            byte[] resizedData = new byte[requiredLength];
+            System.arraycopy(audioDataIntensity, 0, resizedData, 0, audioDataIntensity.length);
+            audioDataIntensity = resizedData;
+        }
+        System.arraycopy(buffer, 0, audioDataIntensity, offset, bytesRead);
+        convertToWav(audioDataIntensity,"cuongdo");
+    }
+
+    private void filterAudioFrequency(int offset, int bytesRead, byte[] buffer) {
+        int requiredLength = offset + bytesRead;
+        if (requiredLength > audioDataFrequency.length) {
+            byte[] resizedData = new byte[requiredLength];
+            System.arraycopy(audioDataFrequency, 0, resizedData, 0, audioDataFrequency.length);
+            audioDataFrequency = resizedData;
+        }
+        System.arraycopy(buffer, 0, audioDataFrequency, offset, bytesRead);
+        convertToWav(audioDataFrequency,"tanso");
     }
 
 
@@ -152,12 +165,11 @@ public class AudioRecorder {
         int bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat);
         AudioTrack audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, sampleRate, channelConfig,
                 audioFormat, bufferSize, AudioTrack.MODE_STREAM);
-
 // Chuẩn bị và phát âm thanh
         audioTrack.play();
-    Log.e("FrameData",Arrays.toString(frameData));
+        Log.e("FrameData", Arrays.toString(frameData));
 // Ghi dữ liệu âm thanh vào AudioTrack từ mảng byte
-        audioTrack.write(audioData, 0, audioData.length);
+        audioTrack.write(frameData, 0, frameData.length);
 
 // Dừng và giải phóng tài nguyên
         audioTrack.stop();
@@ -174,135 +186,14 @@ public class AudioRecorder {
                     convertFrameDataToAudio(audioData);
                     break;
                 case 2:
-                    filterIntensity(audioData, soundIntensity, average, 512, 1024, frameDuration);
+                    convertFrameDataToAudio(audioDataIntensity);
                     break;
                 case 3:
-                    filterFrequency(audioData, soundFrequency, 512, 1024, frameDuration);
+                    convertFrameDataToAudio(audioDataFrequency);
                     break;
             }
         } else {
             Toast.makeText(context, "Chưa có âm thanh", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /// đọc file thanh âm thanh
-    public void readFileAudio() {
-        File file = new File(context.getExternalFilesDir(null), "thuamjava.util.Random@6739123.wav");
-        Log.e("Tag", file.getPath());
-        try {
-            FileInputStream fileInputStream = new FileInputStream(file);
-            audioData = new byte[(int) file.length()];
-            try {
-                fileInputStream.read(audioData);
-                Log.e("TEST", Arrays.toString(audioData));
-                long dataSize = file.length();
-                convertFrameDataToAudio(audioData);
-                Log.e("Tag", Arrays.toString(audioData));
-                audioDuration = dataSize / (16000 * 1 * 2);
-                fileInputStream.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-    }
-
-
-    /**
-     * chia nhỏ âm thanh thnahf các Frame nhỏ mỗi frame có độ lớn là 1024 byte và có FraneSize 512
-     */
-    public void calculateSound(ListenerEntry listenerEntry) {
-        int numFrames = (audioData.length - 1024) / 512 + 1;
-        Log.e("tag", String.valueOf(audioData.length));
-        frameDuration = audioDuration / numFrames;
-        double startTime = 0;
-        double endTime = 0;
-        byte[] frameData = null;
-        double sum = 0;
-        Log.e("Thời lượng của các Frame", String.valueOf(frameDuration));
-        soundIntensity = new double[numFrames];
-        soundFrequency = new double[numFrames];
-        for (int i = 0; i < numFrames; i++) {
-            int startIndex = i * 512;
-            int endIndex = startIndex + 1024;
-            frameData = Arrays.copyOfRange(audioData, startIndex, endIndex);
-            startTime = i * frameDuration;
-            endTime = startTime + frameDuration;
-            double intensity = calculateFrameSoundIntensity(frameData);
-            double frequency = calculateFrequency(frameData);
-            soundIntensity[i] = intensity;
-            soundFrequency[i] = frequency;
-            sum += soundIntensity[i];
-            //   listenerEntry.onListenerEntry(soundIntensity[i], startTime, numFrames);
-            System.out.println("Frame " + i + ": Start Time = " + startTime + "s, End Time = " + endTime + "s" + "  Cường độ âm thanh theo từng khoảng:" + soundIntensity[i] + " Tần số âm thanh:" + soundFrequency[i]);
-        }
-        average = sum / numFrames;
-    }
-
-
-    /**
-     * Lọc tầm số âm thanh
-     */
-    private void filterFrequency(byte[] audioData, double[] soundFrequency, int frameStride, int frameSize, double frameDuration) {
-        int count = 0;
-        if (soundFrequency != null) {
-            for (int j = 0; j < soundFrequency.length; j++)
-                if ((soundFrequency[j] >= 80 && soundFrequency[j] <= 450) || soundFrequency[j] == 0) {
-                    count++;
-                }
-            byte[] mergedFrame = new byte[count * frameSize];
-            byte[] voiceFrame = null;
-            int mergedIndex = 0;
-            for (int j = 0; j < soundFrequency.length; j++)
-                if ((soundFrequency[j] >= 80 && soundFrequency[j] <= 450) || soundFrequency[j] == 0) {
-                    int startIndexFrame = j * frameStride;
-                    int endIndexFrame = startIndexFrame + frameSize;
-                    double startTime = j * frameDuration;
-                    double endTime = startTime + frameDuration;
-                    voiceFrame = Arrays.copyOfRange(audioData, startIndexFrame, endIndexFrame);
-                    System.arraycopy(voiceFrame, 0, mergedFrame, mergedIndex * frameSize, frameSize);
-                    mergedIndex++;
-                }
-            convertFrameDataToAudio(mergedFrame);
-            saveToFile("tan_so_am_thanh.wav", mergedFrame);
-        } else {
-            Toast.makeText(context, "Tần số rỗng", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
-     * lọc cường độ âm thanh
-     */
-    private void filterIntensity(byte[] audioData, double[] soundIntensity, double average, int frameStride, int frameSize, double frameDuration) {
-        if (soundIntensity != null) {
-            int count = 0;
-            for (int j = 0; j < soundIntensity.length; j++)
-                if (soundIntensity[j] >= average) {
-                    count++;
-                }
-            byte[] mergedFrame = new byte[count * frameSize];
-            byte[] voiceFrame = null;
-            int mergedIndex = 0;
-            int totalFrames = audioData.length / frameStride;
-            Log.e(" Size AudioData", String.valueOf(audioData.length));
-            Log.e("tổng số khung", String.valueOf(totalFrames));
-            for (int j = 0; j < soundIntensity.length; j++)
-                if (soundIntensity[j] >= average) {
-                    int startIndexFrame = j * frameStride;
-                    int endIndexFrame = startIndexFrame + frameSize;
-                    double startTime = j * frameDuration;
-                    double endTime = startTime + frameDuration;
-                    voiceFrame = Arrays.copyOfRange(audioData, startIndexFrame, endIndexFrame);
-                    System.arraycopy(voiceFrame, 0, mergedFrame, mergedIndex * frameSize, frameSize);
-                    mergedIndex++;
-                    System.out.println("Frame " + j + ": Start Time = " + startTime + "s, End Time = " + endTime + "s" + "  Cường độ âm thanh theo từng khoảng:" + soundIntensity[j]);
-                } else {
-                }
-            convertFrameDataToAudio(mergedFrame);
-            saveToFile("cuong_do_am_thanh.wav", mergedFrame);
-        } else {
-            Toast.makeText(context, "Cường độ âm thanh rỗng", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -330,9 +221,10 @@ public class AudioRecorder {
      */
     private double calculateFrequency(byte[] frameData) {
         int numSamples = frameData.length / 2;
-        double[] audioData = new double[numSamples];
+        int paddedLength = 1 << (32 - Integer.numberOfLeadingZeros(numSamples - 1));
+        double[] audioData = new double[paddedLength];
 
-        // Chuyển đổi dữ liệu mẫu âm thanh từ byte thành double
+// Chuyển đổi dữ liệu mẫu âm thanh từ byte thành double
         for (int i = 0; i < numSamples; i++) {
             short sample = (short) ((frameData[i * 2] & 0xFF) | (frameData[i * 2 + 1] << 8));
             audioData[i] = sample / 32768.0; // Chuyển đổi giá trị mẫu sang phạm vi [-1.0, 1.0]
@@ -340,18 +232,19 @@ public class AudioRecorder {
 
         FastFourierTransformer transformer = new FastFourierTransformer(DftNormalization.STANDARD);
         Complex[] fftResult = transformer.transform(audioData, TransformType.FORWARD);
-        // Tìm vị trí và amplitudes của phổ âm thanh
+
+// Tìm vị trí và amplitudes của phổ âm thanh
         int maxIndex = -1;
         double maxAmplitude = Double.NEGATIVE_INFINITY;
-        for (int i = 0; i < numSamples / 2; i++) {
+        for (int i = 0; i < paddedLength / 2; i++) {
             double amplitude = fftResult[i].abs();
             if (amplitude > maxAmplitude) {
                 maxAmplitude = amplitude;
                 maxIndex = i;
             }
         }
-        // Tính tần số tương ứng với vị trí của phổ âm thanh tối đa
-        double frequency = (double) maxIndex * 16000 / numSamples;
+// Tính tần số tương ứng với vị trí của phổ âm thanh tối đa
+        double frequency = (double) maxIndex * 16000 / paddedLength;
         return frequency;
     }
 
@@ -363,13 +256,13 @@ public class AudioRecorder {
         File file = null;
         switch (callApiSelected) {
             case 1:
-                file = new File(outputfile);
+                file = new File(context.getExternalFilesDir(null), "audio.wav");
                 break;
             case 2:
-                file = new File(context.getExternalFilesDir(null), "cuong_do_am_thanh.wav");
+                file = new File(context.getExternalFilesDir(null), "cuongdo.wav");
                 break;
             case 3:
-                file = new File(context.getExternalFilesDir(null), "tan_so_am_thanh.wav");
+                file = new File(context.getExternalFilesDir(null), "tanso.wav");
                 break;
         }
         RequestBody requestBody = RequestBody.create(MediaType.parse("multipart/form-data"), file);
@@ -404,52 +297,101 @@ public class AudioRecorder {
     /**
      * lưu File âm thanh sau khi được xử lý
      */
-    private void saveToFile(String nameFile, byte[] frameData) {
+    public  void convertToWav(byte[] audioData,String filename) {
+        File file = new File( context.getExternalFilesDir(null), filename + ".wav");
+        FileOutputStream os = null;
+
         try {
-            FileOutputStream dataOutputStream = new FileOutputStream(new File(context.getExternalFilesDir(null), nameFile));
+            os = new FileOutputStream(file);
+
+            // Header for WAV file
+            writeWavHeader(os, audioData.length);
+
+            // Write audio data to file
+            os.write(audioData);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
             try {
-                dataOutputStream.write(frameData, 0, frameData.length);
-                dataOutputStream.close();
+                if (os != null) {
+                    os.close();
+                }
             } catch (IOException e) {
                 e.printStackTrace();
             }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
         }
     }
 
+    private static void writeWavHeader(FileOutputStream os, int audioDataSize) throws IOException {
+        // WAV file format header
+        int channels = 1;  // Mono
+        int bitsPerSample = 16;
+        int sampleRate = 16000;
+        int byteRate = sampleRate * channels * bitsPerSample / 8;
+        short blockAlign = (short) (channels * bitsPerSample / 8);
 
-    /**
-     * chuyển đổi từ mp4 sang wav
-     */
-    private void convertMp4ToWav() {
-        String inputPath = getOutputFilePath();
-        outputfile = inputPath.replace(".mp4", ".wav");
-        String[] ffmpegCommand = {
-                "-i",
-                inputPath,
-                "-acodec",
-                "pcm_s16le",
-                "-ac",
-                "1",
-                "-ar",
-                "16000",
-                outputfile
-        };
-        FFmpeg.execute(ffmpegCommand);
+        byte[] header = new byte[44];
+        // ChunkID (RIFF)
+        header[0] = 'R';
+        header[1] = 'I';
+        header[2] = 'F';
+        header[3] = 'F';
+        // ChunkSize
+        header[4] = (byte) (audioDataSize + 36);
+        header[5] = (byte) ((audioDataSize + 36) >> 8);
+        header[6] = (byte) ((audioDataSize + 36) >> 16);
+        header[7] = (byte) ((audioDataSize + 36) >> 24);
+        // Format (WAVE)
+        header[8] = 'W';
+        header[9] = 'A';
+        header[10] = 'V';
+        header[11] = 'E';
+        // Subchunk1ID (fmt)
+        header[12] = 'f';
+        header[13] = 'm';
+        header[14] = 't';
+        header[15] = ' ';
+        // Subchunk1Size
+        header[16] = 16;
+        header[17] = 0;
+        header[18] = 0;
+        header[19] = 0;
+        // AudioFormat
+        header[20] = 1;
+        header[21] = 0;
+        // NumChannels
+        header[22] = (byte) channels;
+        header[23] = 0;
+        // SampleRate
+        header[24] = (byte) sampleRate;
+        header[25] = (byte) (sampleRate >> 8);
+        header[26] = (byte) (sampleRate >> 16);
+        header[27] = (byte) (sampleRate >> 24);
+        // ByteRate
+        header[28] = (byte) byteRate;
+        header[29] = (byte) (byteRate >> 8);
+        header[30] = (byte) (byteRate >> 16);
+        header[31] = (byte) (byteRate >> 24);
+        // BlockAlign
+        header[32] = (byte) blockAlign;
+        header[33] = (byte) (blockAlign >> 8);
+        // BitsPerSample
+        header[34] = (byte) bitsPerSample;
+        header[35] = 0;
+        // Subchunk2ID (data)
+        header[36] = 'd';
+        header[37] = 'a';
+        header[38] = 't';
+        header[39] = 'a';
+        // Subchunk2Size
+        header[40] = (byte) audioDataSize;
+        header[41] = (byte) (audioDataSize >> 8);
+        header[42] = (byte) (audioDataSize >> 16);
+        header[43] = (byte) (audioDataSize >> 24);
+
+        os.write(header, 0, 44);
     }
-
-    /**
-     * lấy file path
-     */
-    private String getOutputFilePath() {
-        String fileName = "thuam" + String.valueOf(random) + ".mp4";
-        File file = new File(context.getExternalFilesDir(null), fileName);
-        String filePath = file.getAbsolutePath();
-        Log.e("tag", filePath);
-        return filePath;
-    }
-
 
     public interface ListenerMessage {
         public void onListenerTime(String time);
@@ -458,6 +400,6 @@ public class AudioRecorder {
     }
 
     public interface ListenerEntry {
-        public void onListenerEntry(double soundIntensity, double duration);
+        public void onListenerEntry(double soundIntensity, double duration, double soundFrequency);
     }
 }

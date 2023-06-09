@@ -43,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
     private  int apiSelected =0;
     private AudioRecorder audioRecorder;
     private List<Entry> entries = new ArrayList<>();
+    private  List<Entry> entriesFrequency = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,17 +58,26 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 if (!isRecording) {
                     entries.clear();
+                    entriesFrequency.clear();
                     audioRecorder.startStreamRecord(new AudioRecorder.ListenerEntry() {
                         @Override
-                        public void onListenerEntry(double soundIntensity, double duration) {
+                        public void onListenerEntry(double soundIntensity, double duration,double soundFrequency) {
                             Log.e("Cường độ âm thanh",String.valueOf(soundIntensity)+" Thời gian  "+String.valueOf(duration));
                             for (int i =0;i<500;i++){
-                                entries.add(new Entry((float) duration,(float)soundIntensity));
+                            //    entries.add(new Entry((float) duration,(float)soundIntensity));
+                                entriesFrequency.add(new Entry((float) duration,(float) soundFrequency));
                             }
-                            LineDataSet dataSet = new LineDataSet(entries, "Cường độ âm thanh");
-                            LineData lineData = new LineData(dataSet);
-                            binding.chart.setData(lineData);
-                            binding.chart.invalidate();
+//                            LineDataSet dataSet = new LineDataSet(entries, "Cường độ âm thanh");
+//                            LineData lineData = new LineData(dataSet);
+
+                            LineDataSet dataSetFrequency = new LineDataSet(entriesFrequency,"Tần số âm thanh");
+                            LineData lineDataFrequency = new LineData(dataSetFrequency);
+
+//                            binding.chart.setData(lineData);
+//                            binding.chart.invalidate();
+
+                            binding.chartFrequency.setData(lineDataFrequency);
+                            binding.chartFrequency.invalidate();
                         }
                     });
                     binding.btnRecord256kbps.setText("Dưng ghi âm ");
@@ -83,7 +93,7 @@ public class MainActivity extends AppCompatActivity {
         binding.btnShowChart.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                audioRecorder.readFileAudio();
+             //   audioRecorder.readFileAudio();
             }
         });
         binding.btnCallApi.setOnClickListener(new View.OnClickListener() {
@@ -93,7 +103,8 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(getApplicationContext(),"Nhập domain",Toast.LENGTH_SHORT).show();
                 }
                 else {
-                    audioRecorder.callApi(new AudioRecorder.ListenerMessage() {
+                    audioRecorder.
+                            callApi(new AudioRecorder.ListenerMessage() {
                         @Override
                         public void onListenerTime(String time) {
                             binding.textTime.setText(time);
