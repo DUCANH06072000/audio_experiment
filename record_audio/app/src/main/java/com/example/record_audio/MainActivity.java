@@ -64,20 +64,20 @@ public class MainActivity extends AppCompatActivity {
                         public void onListenerEntry(double soundIntensity, double duration,double soundFrequency) {
                             Log.e("Cường độ âm thanh",String.valueOf(soundIntensity)+" Thời gian  "+String.valueOf(duration));
                             for (int i =0;i<500;i++){
-                            //    entries.add(new Entry((float) duration,(float)soundIntensity));
-                                entriesFrequency.add(new Entry((float) duration,(float) soundFrequency));
+                               entries.add(new Entry((float) duration,(float)soundIntensity));
+                              //  entriesFrequency.add(new Entry((float) duration,(float) soundFrequency));
                             }
-//                            LineDataSet dataSet = new LineDataSet(entries, "Cường độ âm thanh");
-//                            LineData lineData = new LineData(dataSet);
+                            LineDataSet dataSet = new LineDataSet(entries, "Cường độ âm thanh");
+                            LineData lineData = new LineData(dataSet);
 
-                            LineDataSet dataSetFrequency = new LineDataSet(entriesFrequency,"Tần số âm thanh");
-                            LineData lineDataFrequency = new LineData(dataSetFrequency);
+//                            LineDataSet dataSetFrequency = new LineDataSet(entriesFrequency,"Tần số âm thanh");
+//                            LineData lineDataFrequency = new LineData(dataSetFrequency);
 
-//                            binding.chart.setData(lineData);
-//                            binding.chart.invalidate();
+                            binding.chart.setData(lineData);
+                            binding.chart.invalidate();
 
-                            binding.chartFrequency.setData(lineDataFrequency);
-                            binding.chartFrequency.invalidate();
+//                            binding.chartFrequency.setData(lineDataFrequency);
+//                            binding.chartFrequency.invalidate();
                         }
                     });
                     binding.btnRecord256kbps.setText("Dưng ghi âm ");
